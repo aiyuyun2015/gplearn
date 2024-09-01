@@ -236,7 +236,18 @@ class _Program(object):
         return terminals == [-1]
 
     def __str__(self):
-        """Overloads `print` output of the object to resemble a LISP tree."""
+        """Overloads `print` output of the object to resemble a LISP tree.
+        1. self.program is a list of mixed data type, either _Function or integer
+        2. self.program is in fact a depth-first-traverse of the LISP tree
+        3. when the element type is determined, (terminal/_Function vs node/integer)
+
+        list <---> LISP DFS traversal: are injection or 1-to-1 mapping, essentially
+        they are the same representations.
+
+        4. __str__ implementation smartly traverse the LISP tree and print out a
+        math formula-alike str.
+
+        """
         terminals = [0]
         output = ''
         for i, node in enumerate(self.program):
@@ -245,6 +256,7 @@ class _Program(object):
                 output += node.name + '('
             else:
                 if isinstance(node, int):
+                    # Note: this means, the operator is simply select feature index = "node"
                     if self.feature_names is None:
                         output += 'X%s' % node
                     else:
@@ -356,34 +368,58 @@ class _Program(object):
         """
         # Check for single-node programs
         node = self.program[0]
+        # todo: remove this later
+        # print(self)
         if isinstance(node, float):
             return np.repeat(node, X.shape[0])
         if isinstance(node, int):
             return X[:, node]
-
         apply_stack = []
 
         for node in self.program:
-
             if isinstance(node, _Function):
                 apply_stack.append([node])
             else:
                 # Lazily evaluate later
                 apply_stack[-1].append(node)
-
+            # apply_stack is 2D list, each list element, for example apply_stack[i]
+            # is also a list, and apply_stack[0] is _Function, the rest are the leaves
+            # (if there are any)
             while len(apply_stack[-1]) == apply_stack[-1][0].arity + 1:
                 # Apply functions that have sufficient arguments
                 function = apply_stack[-1][0]
+                ####################################################################
                 terminals = [np.repeat(t, X.shape[0]) if isinstance(t, float)
                              else X[:, t] if isinstance(t, int)
                              else t for t in apply_stack[-1][1:]]
+                # todo: what else could it be if it's not integer, float
+                # # Initialize an empty list to hold the results
+                # terminals = []
+                #
+                # # Iterate over the elements in apply_stack[-1][1:]
+                # for t in apply_stack[-1][1:]:
+                #     if isinstance(t, float):
+                #         # If t is a float, repeat it to match the number of rows in X
+                #         repeated_value = np.repeat(t, X.shape[0])
+                #         terminals.append(repeated_value)
+                #     elif isinstance(t, int):
+                #         # If t is an integer, use it to index columns in X
+                #         column_values = X[:, t]
+                #         terminals.append(column_values)
+                #     else:
+                #         # If t is neither a float nor an integer, just use it as-is
+                #         terminals.append(t)
+                #####################################################################
+                # Note: a bit stupid reason why unpack terminals
+                # Here terminals is always a list of 1 array. Question: why not using
+                # array directly? I guess cuz the comprehension list syntax was called
+                # to create terminals.. Use my nested iterations version instead, maybe ?
                 intermediate_result = function(*terminals)
                 if len(apply_stack) != 1:
                     apply_stack.pop()
                     apply_stack[-1].append(intermediate_result)
                 else:
                     return intermediate_result
-
         # We should never get here
         return None
 

@@ -36,7 +36,14 @@ MAX_INT = np.iinfo(np.int32).max
 
 
 def _parallel_evolve(n_programs, parents, X, y, sample_weight, seeds, params):
-    """Private function used to build a batch of programs within a job."""
+    """
+    Private function used to build a batch of programs within a job.
+    n_programs: how many populations are there, size of population
+    parents: a list of _programs, len(parents) = n_programs
+    X: (300, 100) array
+    y: (300,) array
+    sample_weight: None in our example
+    """
     n_samples, n_features = X.shape
     # Unpack parameters
     tournament_size = params['tournament_size']
@@ -56,7 +63,12 @@ def _parallel_evolve(n_programs, parents, X, y, sample_weight, seeds, params):
     max_samples = int(max_samples * n_samples)
 
     def _tournament():
-        """Find the fittest individual from a sub-population."""
+        """Find the fittest individual from a sub-population.
+        1. Randomly select n sub-population, n=tournament_size, and duplicate indices are possible
+        2. if greater is better, select the bigger; otherwise select the smaller
+        """
+        # Generate [0, len(parents)-1], # = tournament_size
+        # Detail1: duplicate indices could exist inside contenders
         contenders = random_state.randint(0, len(parents), tournament_size)
         fitness = [parents[p].fitness_ for p in contenders]
         if metric.greater_is_better:
@@ -69,9 +81,7 @@ def _parallel_evolve(n_programs, parents, X, y, sample_weight, seeds, params):
     programs = []
 
     for i in range(n_programs):
-
         random_state = check_random_state(seeds[i])
-
         if parents is None:
             program = None
             genome = None
@@ -312,6 +322,8 @@ class BaseSymbolic(BaseEstimator, metaclass=ABCMeta):
             X, y = self._validate_data(X, y, y_numeric=True)
 
         hall_of_fame = self.hall_of_fame
+        ####################################################################
+        # 1. check paramter
         if hall_of_fame is None:
             hall_of_fame = self.population_size
         if hall_of_fame > self.population_size or hall_of_fame < 1:
@@ -325,7 +337,9 @@ class BaseSymbolic(BaseEstimator, metaclass=ABCMeta):
             raise ValueError('n_components (%d) must be less than or equal to '
                              'hall_of_fame (%d).' % (self.n_components,
                                                      self.hall_of_fame))
+        # ###########################end of check1###########################
 
+        # 2. Based on function name(str), add to self._function_set
         self._function_set = []
         for function in self.function_set:
             if isinstance(function, str):
@@ -340,14 +354,25 @@ class BaseSymbolic(BaseEstimator, metaclass=ABCMeta):
                                  % type(function))
         if not self._function_set:
             raise ValueError('No valid functions found in `function_set`.')
-
+        # ###########################end of step2###########################
+        # Step3. based on the metric name, add the function to self._metric
         # For point-mutation to find a compatible replacement node
+
+        # What does below do? Ans: create a dict, key=1, 2, 3, etc.
+        # Values are _Function, checkout functions.py::_Function
+        # Each _Function instance includes
+        #         self.function = function --> callable
+        #         self.name = name         --> str
+        #         self.arity = arity       --> int
+        #
+        #
         self._arities = {}
         for function in self._function_set:
             arity = function.arity
             self._arities[arity] = self._arities.get(arity, [])
             self._arities[arity].append(function)
 
+        # Default value of self.metric is "perason"
         if isinstance(self.metric, _Fitness):
             self._metric = self.metric
         elif isinstance(self, RegressorMixin):
@@ -360,10 +385,14 @@ class BaseSymbolic(BaseEstimator, metaclass=ABCMeta):
                 raise ValueError('Unsupported metric: %s' % self.metric)
             self._metric = _fitness_map[self.metric]
         elif isinstance(self, TransformerMixin):
+            # what does this check do? So i guess transformer only supports these two.
             if self.metric not in ('pearson', 'spearman'):
                 raise ValueError('Unsupported metric: %s' % self.metric)
-            self._metric = _fitness_map[self.metric]
-
+            self._metric = _fitness_map[self.metric] # when self.metric is a str, then
+            # _fitness_map[self.metric] will return a _Fitness instance
+        ##########################################################
+        # Step4, define probability for cross_over, various mutations
+        # save them in a cumsum format.
         self._method_probs = np.array([self.p_crossover,
                                        self.p_subtree_mutation,
                                        self.p_hoist_mutation,
@@ -374,7 +403,7 @@ class BaseSymbolic(BaseEstimator, metaclass=ABCMeta):
             raise ValueError('The sum of p_crossover, p_subtree_mutation, '
                              'p_hoist_mutation and p_point_mutation should '
                              'total to 1.0 or less.')
-
+        ##################################################################
         if self.init_method not in ('half and half', 'grow', 'full'):
             raise ValueError('Valid program initializations methods include '
                              '"grow", "full" and "half and half". Given %s.'
@@ -458,21 +487,27 @@ class BaseSymbolic(BaseEstimator, metaclass=ABCMeta):
         if self.verbose:
             # Print header fields
             self._verbose_reporter()
-
+        ########################################## Eseence ##################################
+        ########################################## Eseence ##################################
+        ########################################## Eseence ##################################
+        # Iterate on each generation
         for gen in range(prior_generations, self.generations):
-
             start_time = time()
-
+            # If it's the first gen, no parents
             if gen == 0:
                 parents = None
             else:
-                parents = self._programs[gen - 1]
-
+                parents = self._programs[gen - 1] # If low_memory, all prevous programs=None
+            ######################################################
             # Parallel loop
+            # 1. partition populations_size (output programs) by n_jobs
+            # 2. output is a list of lists (of populations)
+            # What is n_programs? it's a list, indicate inside each partition
+            # how many populations are there
+            # In a simplest example, self.population = 2000, then n_programs = [2000]
             n_jobs, n_programs, starts = _partition_estimators(
                 self.population_size, self.n_jobs)
             seeds = random_state.randint(MAX_INT, size=self.population_size)
-
             population = Parallel(n_jobs=n_jobs,
                                   verbose=int(self.verbose > 1))(
                 delayed(_parallel_evolve)(n_programs[i],
@@ -483,10 +518,13 @@ class BaseSymbolic(BaseEstimator, metaclass=ABCMeta):
                                           seeds[starts[i]:starts[i + 1]],
                                           params)
                 for i in range(n_jobs))
-
+            ######################################################
             # Reduce, maintaining order across different n_jobs
+            # convert a list of lists to flatten list
             population = list(itertools.chain.from_iterable(population))
-
+            # Note: the program.raw_fitness_ was updated when evolve
+            # meaning, when we have a generation, all the programs will
+            # have a raw_fitness_ update
             fitness = [program.raw_fitness_ for program in population]
             length = [program.length_ for program in population]
 
@@ -499,6 +537,7 @@ class BaseSymbolic(BaseEstimator, metaclass=ABCMeta):
 
             self._programs.append(population)
 
+            ####################### Performance code #######################
             # Remove old programs that didn't make it into the new population.
             if not self.low_memory:
                 for old_gen in np.arange(gen, 0, -1):
@@ -515,8 +554,10 @@ class BaseSymbolic(BaseEstimator, metaclass=ABCMeta):
             elif gen > 0:
                 # Remove old generations
                 self._programs[gen - 1] = None
+            ################################################################
 
             # Record run details
+            # todo(question): shouldn't we use the parsimony_coefficient fitness?
             if self._metric.greater_is_better:
                 best_program = population[np.argmax(fitness)]
             else:
@@ -528,6 +569,9 @@ class BaseSymbolic(BaseEstimator, metaclass=ABCMeta):
             self.run_details_['best_length'].append(best_program.length_)
             self.run_details_['best_fitness'].append(best_program.raw_fitness_)
             oob_fitness = np.nan
+            # Note: oob_fitness_ was also updated when calling evolve, so each new gen
+            # includes this
+            # self.max_samples = 0.9 this is to control how many samples are training/test
             if self.max_samples < 1.0:
                 oob_fitness = best_program.oob_fitness_
             self.run_details_['best_oob_fitness'].append(oob_fitness)
@@ -546,7 +590,9 @@ class BaseSymbolic(BaseEstimator, metaclass=ABCMeta):
                 best_fitness = fitness[np.argmin(fitness)]
                 if best_fitness <= self.stopping_criteria:
                     break
+        ############# End of generation ########################
 
+        # n_population > hall_of_fame > n_components (final number of programs)
         if isinstance(self, TransformerMixin):
             # Find the best individuals in the final generation
             fitness = np.array(fitness)
@@ -554,19 +600,33 @@ class BaseSymbolic(BaseEstimator, metaclass=ABCMeta):
                 hall_of_fame = fitness.argsort()[::-1][:self.hall_of_fame]
             else:
                 hall_of_fame = fitness.argsort()[:self.hall_of_fame]
-            evaluation = np.array([gp.execute(X) for gp in
-                                   [self._programs[-1][i] for
-                                    i in hall_of_fame]])
+            # evaluation = np.array([gp.execute(X) for gp in
+            #                        [self._programs[-1][i] for
+            #                         i in hall_of_fame]])
+
+            # hall_of_fame is a list of indices (with best fitness)
+            #
+            evaluation = []
+            for i in hall_of_fame:
+                gp = self._programs[-1][i]
+                result = gp.execute(X)
+                # Append the result to the evaluation list
+                evaluation.append(result)
+            evaluation = np.array(evaluation)
+
             if self.metric == 'spearman':
                 evaluation = np.apply_along_axis(rankdata, 1, evaluation)
 
             with np.errstate(divide='ignore', invalid='ignore'):
                 correlations = np.abs(np.corrcoef(evaluation))
-            np.fill_diagonal(correlations, 0.)
+            np.fill_diagonal(correlations, 0.) # set diagonal elements to 0
+
             components = list(range(self.hall_of_fame))
             indices = list(range(self.hall_of_fame))
             # Iteratively remove least fit individual of most correlated pair
             while len(components) > self.n_components:
+                # Cool. unravel index will map an 1-d index to a 2-d indices here
+                # Thus, we will get row_idx, col_idx
                 most_correlated = np.unravel_index(np.argmax(correlations),
                                                    correlations.shape)
                 # The correlation matrix is sorted by fitness, so identifying
@@ -1471,6 +1531,7 @@ class SymbolicTransformer(BaseSymbolic, TransformerMixin):
 
         Parameters
         ----------
+
         X : array-like, shape = [n_samples, n_features]
             Input vectors, where n_samples is the number of samples
             and n_features is the number of features.
