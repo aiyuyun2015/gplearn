@@ -163,17 +163,11 @@ class _Program(object):
         self._indices_state = None
 
     def build_program(self, random_state):
-        """Build a naive random program.
+        """
+        This function is to build program or init population, gen_rnd_expr() from the book.
 
-        Parameters
-        ----------
-        random_state : RandomState instance
-            The random number generator.
-
-        Returns
-        -------
-        program : list
-            The flattened tree representation of the program.
+        1. We could follow the book and recursively build
+        2. (Not recommended) Follow what gplearn src, and do the iteration (using while terminal_stack)
 
         """
         if self.init_method == 'half and half':
@@ -217,6 +211,8 @@ class _Program(object):
                     terminal_stack.pop()
                     if not terminal_stack:
                         return program
+                    # why subtract one again? Subtree built will
+                    # automatically be the "arity"
                     terminal_stack[-1] -= 1
 
         # We should never get here

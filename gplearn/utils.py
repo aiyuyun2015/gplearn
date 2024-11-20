@@ -12,6 +12,40 @@ import numpy as np
 from joblib import cpu_count
 
 
+import pandas as pd
+import numpy as np
+
+def calc_cross_sectional_xcr(xdf, ydf, option="pearson"):
+    xdf = pd.DataFrame(xdf)
+    ydf = pd.DataFrame(ydf)
+    NonNanMask = np.where(xdf.mul(ydf).isnull().values, np.nan, 1)
+    NonNanMaskDf = pd.DataFrame(index=xdf.index, columns=xdf.columns, data=NonNanMask)
+    xdf = xdf.fillna(0).mul(NonNanMaskDf)
+    ydf = ydf.fillna(0).mul(NonNanMaskDf)
+    Cntx = xdf.count(axis=1).apply(lambda x: x if x > 0 else np.nan)
+    Cnt = ydf.count(axis=1).apply(lambda x: x if x > 0 else np.nan)
+    if option == 'pearson':
+        pass
+    elif option =='spearman':
+        xdf = xdf.rank(axis=1)
+        ydf = ydf.rank(axis=1)
+    else:
+        raise ValueError(f'Unspecified option=[option]')
+    SumXY = xdf.mul(ydf).sum(axis=1)
+    SumX = xdf.sum(axis=1)
+    SumY = ydf.sum(axis=1)
+    Sumx2 = xdf.mul(xdf).sum(axis=1)
+    SumY2 = ydf.mul(ydf).sum(axis=1)
+    P1 = Cnt * SumXY - SumX * SumY
+    P2 = ((Cnt * Sumx2 - SumX * SumX) * (Cnt * SumY2 - SumY * SumY)).apply(lambda x: np.sqrt(x) if x > 1e-10 else np.nan)
+    Xcr = P1 / P2
+    ErrList = np.argwhere(np.abs(Xcr.values) > 1 + 1e-6)
+    for idx in ErrList:
+        print(f"***ERR: idx={idx} Xcr={Xcr.values[idx]}, XCount={Cntx.values[idx]}, YCount={Cnt.values[idx]}")
+    assert len(ErrList) == 0, f'Xcr.abs>1 on {len(ErrList)} samples.'
+    return Xcr
+
+
 def check_random_state(seed):
     """Turn seed into a np.random.RandomState instance
 
